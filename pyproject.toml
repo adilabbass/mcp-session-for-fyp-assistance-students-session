@@ -1,0 +1,19 @@
+[project]
+name = "fyp-assistant"
+version = "0.1.0"
+description = "Teaching demo of Model Context Protocol (MCP) for a Library Management System FYP."
+requires-python = ">=3.11"
+dependencies = [
+    "mcp==2.2.0",
+    "openai>=1.50",
+    "python-dotenv>=1.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
