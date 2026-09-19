@@ -24,6 +24,7 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 TOOL_MAP = {
     "list": "list_issues",
     "create": "issue_write",
+    "update": "issue_write",
 }
 
 
@@ -93,3 +94,27 @@ async def create_repo_issue(session: ClientSession, title: str, body: str = "") 
         TOOL_MAP["create"],
         {"owner": owner, "repo": repo, "method": "create", "title": title, "body": body},
     )
+
+
+async def update_repo_issue(
+    session: ClientSession,
+    issue_number: int,
+    title: str = "",
+    body: str = "",
+    state: str = "",
+) -> Any:
+    owner, repo = _configured_repo()
+    _check_target(owner, repo)
+    args: dict[str, Any] = {
+        "owner": owner,
+        "repo": repo,
+        "method": "update",
+        "issue_number": issue_number,
+    }
+    if title:
+        args["title"] = title
+    if body:
+        args["body"] = body
+    if state:
+        args["state"] = state
+    return await session.call_tool(TOOL_MAP["update"], args)

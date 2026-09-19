@@ -5,8 +5,10 @@ No GitHub or Anthropic credentials required.
 
 from __future__ import annotations
 
+import json
 import os
 import sys
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -75,6 +77,98 @@ async def test_save_and_read_back(isolated_env, tmp_path):
         text = _text(result.content)
         assert "ok" in text.lower() or "meeting_summary.md" in text
 
-        saved = Path(isolated_env["FYP_OUTPUT_DIR"]) / "meeting_summary.md"
-        assert saved.exists()
-        assert saved.read_text(encoding="utf-8") == summary
+        today_iso = date.today().isoformat()
+        out = Path(isolated_env["FYP_OUTPUT_DIR"])
+        matches = list(out.glob(f"meeting_summary_{today_iso}_*.md"))
+        assert len(matches) == 1
+        assert matches[0].read_text(encoding="utf-8") == summary
+
+
+def _payload(call_result):
+    """Parse a tool call's text content as JSON (our tools all return dicts)."""
+    return json.loads(_text(call_result.content))
+
+
+@pytest.mark.asyncio
+async def test_save_and_get_by_date(isolated_env):
+    async with local_client.open_local_server(env=isolated_env) as session:
+        await local_client.call_tool(
+            session, "save_meeting_summary", {"summary": "hello world"}
+        )
+        today_iso = date.today().isoformat()
+        got = await local_client.call_tool(
+            session, "get_meeting_summary_by_date", {"date": today_iso}
+        )
+        data = _payload(got)
+        assert data["ok"] is True
+        assert data["summary"] == "hello world"
+
+
+@pytest.mark.asyncio
+async def test_list_meeting_summaries_after_save(isolated_env):
+    async with local_client.open_local_server(env=isolated_env) as session:
+        await local_client.call_tool(
+            session, "save_meeting_summary", {"summary": "note"}
+        )
+        listed = await local_client.call_tool(session, "list_meeting_summaries", {})
+        data = _payload(listed)
+        assert data["count"] == 1
+        assert data["summaries"][0]["name"].startswith(
+            f"meeting_summary_{date.today().isoformat()}_"
+        )
+
+
+@pytest.mark.asyncio
+async def test_search_finds_known_word(isolated_env):
+    async with local_client.open_local_server(env=isolated_env) as session:
+        result = await local_client.call_tool(
+            session, "search_project_brief", {"query": "library"}
+        )
+        data = _payload(result)
+        assert data["match_count"] > 0
+        assert all(m["source"] in {"brief", "guidelines"} for m in data["matches"])
+
+
+@pytest.mark.asyncio
+async def test_update_project_brief_round_trip(isolated_env, tmp_path):
+    """Copy the brief into a scratch dir, point server at it via env, then round-trip.
+
+    We can't rely on the real data file staying stable, so we work off a copy
+    and restore state at the end.
+    """
+    import shutil
+    real_brief = Path(__file__).resolve().parents[1] / "data" / "project_brief.md"
+    original = real_brief.read_text(encoding="utf-8")
+    try:
+        async with local_client.open_local_server(env=isolated_env) as session:
+            result = await local_client.call_tool(
+                session,
+                "update_project_brief",
+                {"old_text": "Library Management System", "new_text": "LMS"},
+            )
+            data = _payload(result)
+            assert data["ok"] is True
+            assert data["replacements"] >= 1
+            assert "LMS" in real_brief.read_text(encoding="utf-8")
+
+            missing = await local_client.call_tool(
+                session,
+                "update_project_brief",
+                {"old_text": "this-text-should-not-exist-anywhere", "new_text": "x"},
+            )
+            assert _payload(missing)["ok"] is False
+    finally:
+        real_brief.write_text(original, encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_estimate_progress_on_track(isolated_env):
+    async with local_client.open_local_server(env=isolated_env) as session:
+        result = await local_client.call_tool(
+            session,
+            "estimate_progress",
+            {"done_tasks": 8, "total_tasks": 20, "weeks_left": 6},
+        )
+        data = _payload(result)
+        assert data["percent_done"] == 40.0
+        assert data["verdict"] == "on_track"

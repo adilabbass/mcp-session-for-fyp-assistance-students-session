@@ -12,6 +12,7 @@ import asyncio
 import json
 import os
 from contextlib import AsyncExitStack
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -19,7 +20,7 @@ import client as local_client
 import github_client as gh
 import llm_service
 
-load_dotenv()
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 BRIEF_URI = "fyp://project/brief"
 GUIDELINES_URI = "fyp://project/guidelines"
