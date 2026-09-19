@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from mcp.server.mcpserver import MCPServer
@@ -91,6 +92,67 @@ def save_meeting_summary(summary: str) -> dict:
     path.write_text(summary, encoding="utf-8")
     log.info("wrote %s (%d chars)", path, len(summary))
     return {"ok": True, "path": str(path)}
+
+
+@mcp.tool(description="List previously saved meeting summaries in the output directory, newest first.")
+def list_meeting_summaries() -> dict:
+    """Return metadata for every file in the output directory."""
+    out_dir = output_dir()
+    if not out_dir.exists():
+        return {"count": 0, "summaries": []}
+    entries = []
+    for p in out_dir.iterdir():
+        if p.is_file():
+            stat = p.stat()
+            entries.append({
+                "name": p.name,
+                "size_bytes": stat.st_size,
+                "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
+            })
+    entries.sort(key=lambda e: e["modified"], reverse=True)
+    return {"count": len(entries), "summaries": entries}
+
+
+@mcp.tool(description="Case-insensitive search across the project brief and supervisor guidelines. Returns matching lines with source and line number.")
+def search_project_brief(query: str) -> dict:
+    """Search the two project resources for a substring."""
+    if not query or not query.strip():
+        return {"query": query, "matches": [], "error": "query must not be empty"}
+    needle = query.lower()
+    matches = []
+    for label, path in (("brief", BRIEF_FILE), ("guidelines", GUIDELINES_FILE)):
+        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            if needle in line.lower():
+                matches.append({"source": label, "line": lineno, "text": line.strip()})
+    return {"query": query, "match_count": len(matches), "matches": matches}
+
+
+@mcp.tool(description="Estimate FYP progress from completed vs total tasks and weeks remaining. Returns percent done, required weekly velocity, and an on-track verdict.")
+def estimate_progress(done_tasks: int, total_tasks: int, weeks_left: int) -> dict:
+    """Pure computation — no I/O, no external calls."""
+    if total_tasks <= 0:
+        return {"error": "total_tasks must be greater than zero"}
+    if done_tasks < 0 or weeks_left < 0:
+        return {"error": "done_tasks and weeks_left must be non-negative"}
+    remaining = max(total_tasks - done_tasks, 0)
+    percent_done = round(done_tasks / total_tasks * 100, 1)
+    required_velocity = round(remaining / weeks_left, 2) if weeks_left > 0 else None
+    if percent_done >= 100:
+        verdict = "complete"
+    elif weeks_left == 0:
+        verdict = "overdue"
+    elif required_velocity is not None and required_velocity <= 3:
+        verdict = "on_track"
+    elif required_velocity is not None and required_velocity <= 6:
+        verdict = "tight"
+    else:
+        verdict = "at_risk"
+    return {
+        "percent_done": percent_done,
+        "remaining_tasks": remaining,
+        "required_tasks_per_week": required_velocity,
+        "verdict": verdict,
+    }
 
 
 if __name__ == "__main__":

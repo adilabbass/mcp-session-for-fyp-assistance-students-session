@@ -5,3 +5,8 @@ __pycache__/
 .venv/
 output/
 *.egg-info/
+.env*
+*.pem
+*.key
+**/secrets/
+**/credentials/
