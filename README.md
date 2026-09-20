@@ -26,32 +26,30 @@ You can drive the same MCP server two different ways:
                       |        |
        MCP over stdio |        | direct HTTPS (OpenAI SDK)
                       |        |
-     +----------------+        +----------------+
-     |                                          |
-+----v-----------+                          +---v----------------+
-| client.py      |                          | llm_service.py     |
-| (MCP client)   |                          | (OpenAI client)    |
-+----+-----------+                          +----+---------------+
-     |                                           |
-     v                                           v
-+----------------+                          +----------------+
-| server.py      |                          |  OpenAI API    |
-| (local MCP     |                          |                |
-|  server)       |                          |                |
-+----------------+                          +----------------+
++---------------------+        +---------------------+
+| client.py           |        | llm_service.py      |
+| (MCP client)        |        | (OpenAI client)     |
++----+----------------+        +----+----------------+
+     |                                |
+     v                                v
++----------------+               +----------------+
+| server.py      |               |  OpenAI API    |
+| (local MCP     |               |                |
+|  server)       |               |                |
++----------------+               +----------------+
 
 
                 Option B: Claude desktop is the host
                 +---------------------------+
                 |   Claude desktop app      |
                 |  (host + MCP client)      |
-                +-----+---------------------+
-                      |
-       MCP over stdio |
-                      v
-              +----------------+
-              | server.py      |
-              +----------------+
+                +-------------+-------------+
+                              |
+               MCP over stdio |
+                              v
+                    +----------------+
+                    | server.py      |
+                    +----------------+
 ```
 
 - **Host** — orchestrates and (optionally) talks to a model.
@@ -70,6 +68,34 @@ You can drive the same MCP server two different ways:
 returns a template. In our terminal host, the template plus the collected
 context is separately handed to OpenAI. In Claude desktop, Claude decides
 what to do with it.
+
+## What the server exposes
+
+The whole surface lives in [`server.py`](server.py):
+
+**Resources**
+
+| URI                          | What it returns                        |
+|------------------------------|----------------------------------------|
+| `fyp://project/brief`        | The Library Management System brief    |
+| `fyp://project/guidelines`   | Supervisor expectations & assessment   |
+
+**Prompt**
+
+| Name                         | Arguments             | Returns                              |
+|------------------------------|-----------------------|--------------------------------------|
+| `prepare_supervisor_meeting` | `duration_minutes`    | A structured meeting-prep template   |
+
+**Tools**
+
+| Name                            | Purpose                                                            |
+|---------------------------------|--------------------------------------------------------------------|
+| `save_meeting_summary`          | Write a timestamped summary file to the output directory           |
+| `get_meeting_summary_by_date`   | Fetch the newest summary saved on a given `YYYY-MM-DD`             |
+| `list_meeting_summaries`        | List every saved summary, newest first                             |
+| `update_project_brief`          | In-place find/replace on `data/project_brief.md`                   |
+| `search_project_brief`          | Case-insensitive search over the brief and guidelines              |
+| `estimate_progress`             | Pure math: percent done, required velocity, on-track verdict       |
 
 ## Setup
 
@@ -91,11 +117,11 @@ python main.py
 
 ### Environment variables
 
-| Variable                        | Needed for                    | Notes                                    |
-|---------------------------------|-------------------------------|------------------------------------------|
-| `OPENAI_API_KEY`                | Menu option 4 (LLM summary)   | Options 1–3, 5 work without              |
-| `OPENAI_MODEL`                  | Optional model override       | Default `gpt-4o-mini`                    |
-| `FYP_OUTPUT_DIR`                | Where `save_meeting_summary` writes | Default `output/`                  |
+| Variable            | Needed for                              | Notes                     |
+|---------------------|-----------------------------------------|---------------------------|
+| `OPENAI_API_KEY`    | Menu option 4 (LLM summary)             | Options 1–3, 5 work without |
+| `OPENAI_MODEL`      | Optional model override                 | Default `gpt-4o-mini`     |
+| `FYP_OUTPUT_DIR`    | Where `save_meeting_summary` writes     | Default `output/`         |
 
 ## Option A — Try it in 5 minutes (terminal host)
 
@@ -163,6 +189,7 @@ a small tools icon in the composer. Try prompts like:
 - *"Use the prepare_supervisor_meeting prompt for a 30 minute meeting."* →
   Claude fetches the template via `prompts/get`, then writes the summary
   itself using the resource content.
+- *"Search the brief for 'borrow'."* → Claude calls `search_project_brief`.
 - *"Save that as my meeting summary."* → Claude calls
   `save_meeting_summary`. It will ask for your confirmation because it is a
   destructive tool.
@@ -183,6 +210,21 @@ under the hood.
 - Tools appear but calls fail → make sure the paths in `env` exist and are
   writable by the Claude app.
 
+## Project layout
+
+```
+fyp-assistant/
+├── server.py         # local MCP server (resources, prompt, tools)
+├── client.py         # thin MCP client wrapper for the terminal host
+├── main.py           # numbered-menu terminal host
+├── llm_service.py    # direct OpenAI call for the summary step
+├── data/             # project_brief.md, supervisor_guidelines.md
+├── output/           # timestamped meeting summaries land here
+├── tests/            # pytest suite driving the real server over stdio
+├── pyproject.toml
+└── requirements.txt
+```
+
 ## Tests
 
 ```bash
@@ -194,7 +236,10 @@ The single test file starts the real local MCP server over stdio and verifies:
 - Capability discovery (tools, resources, prompts).
 - Reading both resources.
 - Retrieving the prompt with arguments.
-- Saving and reading back a summary in an isolated `tmp_path`.
+- Saving, reading back, listing and searching summaries in an isolated
+  `tmp_path`.
+- `update_project_brief` round-trip.
+- `estimate_progress` math.
 
 OpenAI and the Claude desktop path are **not** covered by automated
 tests — they need real credentials or a running app.
@@ -211,6 +256,9 @@ npx @modelcontextprotocol/inspector uv run python server.py
   sequence: the host chooses which MCP calls to make and only then calls the
   LLM to summarise. (Claude desktop, of course, decides for itself — that's
   the whole point of using it as the host.)
+- No external MCP servers. This project used to also proxy the official
+  GitHub MCP server; that integration has been removed to keep the demo
+  focused on a single, locally-run server.
 - No database, ORM, web UI, Docker, or DI framework.
 - No custom JSON-RPC — everything goes through the official MCP SDK.
 

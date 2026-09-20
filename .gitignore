@@ -1,12 +1,12 @@
-.env
 __pycache__/
 *.pyc
 .pytest_cache/
 .venv/
 output/
 *.egg-info/
-.env*
 *.pem
 *.key
 **/secrets/
 **/credentials/
+config.bat
+node_modules
