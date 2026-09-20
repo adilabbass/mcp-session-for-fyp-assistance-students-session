@@ -18,8 +18,6 @@ from mcp.server.mcpserver import MCPServer
 
 from dotenv import load_dotenv
 
-import github_client as gh
-
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
 logging.basicConfig(level=logging.INFO, stream=sys.stderr, format="[server] %(message)s")
@@ -58,8 +56,8 @@ def project_guidelines() -> str:
 def prepare_supervisor_meeting(duration_minutes: str) -> str:
     """Return a reusable meeting-prep template.
 
-    The template asks the caller (the host) to supply evidence and GitHub task
-    information itself — this prompt does not fetch anything or call a model.
+    The template asks the caller (the host) to supply evidence itself — this
+    prompt does not fetch anything or call a model.
 
     MCP prompt arguments are strings on the wire, so we parse here.
     """
@@ -70,20 +68,19 @@ def prepare_supervisor_meeting(duration_minutes: str) -> str:
     return (
         f"You are helping a student team prepare for a {minutes}-minute "
         "supervisor meeting for their final-year project.\n\n"
-        "Using the project brief, supervisor guidelines and the current GitHub "
-        "issues provided by the host, produce a concise meeting note with these "
-        "four numbered sections:\n\n"
+        "Using the project brief and supervisor guidelines provided by the "
+        "host, produce a concise meeting note with these four numbered "
+        "sections:\n\n"
         "1. Progress — what was completed, each item supported by the supplied "
-        "evidence (a closed issue, a demo, a merged PR). Do not invent progress.\n"
-        "2. Pending work and blockers — open issues, in-progress work, anything "
-        "waiting on the supervisor or another team.\n"
+        "evidence (a demo, a document, a delivered feature). Do not invent "
+        "progress.\n"
+        "2. Pending work and blockers — in-progress work, anything waiting on "
+        "the supervisor or another team.\n"
         "3. Questions for the supervisor — specific decisions or feedback the "
         "team needs, framed so the supervisor can answer briefly.\n"
         "4. Suggested next steps — a short ordered list of what the team plans "
         "to do before the next meeting.\n\n"
-        "Keep the whole note under one page. If GitHub information is missing, "
-        'say so explicitly under section 1 as "GitHub progress unavailable" '
-        "rather than guessing."
+        "Keep the whole note under one page."
     )
 
 
@@ -197,64 +194,6 @@ def estimate_progress(done_tasks: int, total_tasks: int, weeks_left: int) -> dic
         "required_tasks_per_week": required_velocity,
         "verdict": verdict,
     }
-
-
-def _tool_text(result) -> str:
-    return "\n".join(getattr(c, "text", "") or "" for c in result.content)
-
-
-@mcp.tool(description="List issues from the configured GitHub repo (env: GITHUB_OWNER, GITHUB_REPO, GITHUB_PERSONAL_ACCESS_TOKEN). state='open'|'closed'|'all'.")
-async def github_list_issues(state: str = "open") -> dict:
-    """Proxy to the external github-mcp-server via github_client."""
-    if not gh.github_configured():
-        return {"ok": False, "error": "GitHub env vars missing (GITHUB_PERSONAL_ACCESS_TOKEN, GITHUB_OWNER, GITHUB_REPO)"}
-    try:
-        async with gh.open_github_server() as session:
-            result = await gh.list_repo_issues(session, state=state)
-            return {"ok": True, "state": state, "raw": _tool_text(result)}
-    except Exception as e:
-        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
-
-
-@mcp.tool(description="Create a new issue in the configured GitHub repo. 'title' is required; 'body' is the issue description (optional).")
-async def create_github_issue(title: str, body: str = "") -> dict:
-    """Create an issue in owner/repo (both fixed by env)."""
-    if not gh.github_configured():
-        return {"ok": False, "error": "GitHub env vars missing (GITHUB_PERSONAL_ACCESS_TOKEN, GITHUB_OWNER, GITHUB_REPO)"}
-    if not title.strip():
-        return {"ok": False, "error": "title must not be empty"}
-    try:
-        async with gh.open_github_server() as session:
-            result = await gh.create_repo_issue(session, title=title, body=body)
-            return {"ok": True, "title": title, "raw": _tool_text(result)}
-    except Exception as e:
-        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
-
-
-@mcp.tool(description="Update an existing issue by number. Only fields you pass are changed; omit the others. state='open'|'closed'.")
-async def update_github_issue(
-    issue_number: int,
-    title: str = "",
-    body: str = "",
-    state: str = "",
-) -> dict:
-    """Update the given issue and return the API response."""
-    if not gh.github_configured():
-        return {"ok": False, "error": "GitHub env vars missing (GITHUB_PERSONAL_ACCESS_TOKEN, GITHUB_OWNER, GITHUB_REPO)"}
-    if issue_number <= 0:
-        return {"ok": False, "error": "issue_number must be a positive integer"}
-    if not (title or body or state):
-        return {"ok": False, "error": "provide at least one field to update: title, body, or state"}
-    if state and state not in {"open", "closed"}:
-        return {"ok": False, "error": "state must be 'open' or 'closed'"}
-    try:
-        async with gh.open_github_server() as session:
-            result = await gh.update_repo_issue(
-                session, issue_number=issue_number, title=title, body=body, state=state,
-            )
-            return {"ok": True, "issue_number": issue_number, "raw": _tool_text(result)}
-    except Exception as e:
-        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
 
 
 if __name__ == "__main__":

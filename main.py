@@ -9,15 +9,12 @@ protocol calls being made.
 from __future__ import annotations
 
 import asyncio
-import json
-import os
 from contextlib import AsyncExitStack
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 import client as local_client
-import github_client as gh
 import llm_service
 
 load_dotenv(Path(__file__).resolve().parent / ".env")
@@ -52,33 +49,12 @@ def _tool_result_text(call_result) -> str:
     return "\n".join(parts) or "(no text content)"
 
 
-def _parse_issues(text: str):
-    try:
-        data = json.loads(text)
-    except Exception:
-        return None
-    if isinstance(data, dict) and "issues" in data:
-        return data["issues"]
-    if isinstance(data, list):
-        return data
-    return None
-
-
-async def menu_explore(local, gh_session):
+async def menu_explore(local):
     label("tools/list, resources/list, prompts/list", "local server")
     caps = await local_client.list_capabilities(local)
     print(f"  tools:     {[t.name for t in caps['tools']]}")
     print(f"  resources: {[r.uri.__str__() for r in caps['resources']]}")
     print(f"  prompts:   {[p.name for p in caps['prompts']]}")
-
-    if gh_session is not None:
-        label("tools/list", "GitHub server")
-        tools = await gh.inspect_tools(gh_session)
-        print(f"  tools ({len(tools)}): showing first 10")
-        for t in tools[:10]:
-            print(f"    - {t.name}")
-    else:
-        print("\n  (GitHub server not configured — skipping)")
 
 
 async def menu_read_resources(local):
@@ -107,18 +83,7 @@ async def menu_view_prompt(local):
     print("\n(Note: this only returned a template. No AI response was generated.)")
 
 
-async def menu_list_github(gh_session):
-    if gh_session is None:
-        print("GitHub is not configured. Set GITHUB_PERSONAL_ACCESS_TOKEN, GITHUB_OWNER, GITHUB_REPO.")
-        return None
-    label("tools/call", f"{gh.TOOL_MAP['list']}({os.environ['GITHUB_OWNER']}/{os.environ['GITHUB_REPO']})")
-    result = await gh.list_repo_issues(gh_session)
-    text = _tool_result_text(result)
-    print(text)
-    return text
-
-
-async def menu_prepare_summary(local, gh_session, state):
+async def menu_prepare_summary(local, state):
     if not llm_service.llm_configured():
         print("OPENAI_API_KEY is not set — cannot generate a summary.")
         return
@@ -142,24 +107,11 @@ async def menu_prepare_summary(local, gh_session, state):
             template_parts.append(t)
     template = "\n".join(template_parts)
 
-    issues_payload = None
-    if gh_session is not None:
-        label("tools/call", f"{gh.TOOL_MAP['list']} (for meeting context)")
-        try:
-            result = await gh.list_repo_issues(gh_session)
-            text = _tool_result_text(result)
-            issues_payload = _parse_issues(text) or text
-        except Exception as e:
-            print(f"GitHub call failed ({e}); continuing without task list.")
-    else:
-        print("(GitHub not configured — summary will note 'GitHub progress unavailable'.)")
-
     print("\nCalling the LLM... (this is a direct OpenAI API call, not an MCP call)")
     summary = llm_service.summarise_for_supervisor(
         brief_md=brief,
         guidelines_md=guidelines,
         prompt_template=template,
-        issues=issues_payload,
         duration_minutes=duration,
     )
     print("---")
@@ -171,7 +123,7 @@ async def menu_prepare_summary(local, gh_session, state):
 async def menu_save_summary(local, state):
     summary = state.get("last_summary")
     if not summary:
-        print("No summary in memory. Options: generate one via option 5, or paste sample text.")
+        print("No summary in memory. Options: generate one via option 4, or paste sample text.")
         if confirm("Enter sample summary text now?"):
             summary = input("Summary text: ").strip()
             if not summary:
@@ -179,29 +131,11 @@ async def menu_save_summary(local, state):
                 return
         else:
             return
-    if not confirm("Save this summary to output/meeting_summary.md (overwriting)?"):
+    if not confirm("Save this summary to output/meeting_summary_<timestamp>.md?"):
         print("Cancelled.")
         return
     label("tools/call", f"{SAVE_TOOL}(summary=<{len(summary)} chars>)")
     result = await local_client.call_tool(local, SAVE_TOOL, {"summary": summary})
-    print(_tool_result_text(result))
-
-
-async def menu_create_issue(gh_session):
-    if gh_session is None:
-        print("GitHub is not configured.")
-        return
-    title = input("Issue title: ").strip()
-    if not title:
-        print("Title required.")
-        return
-    body = input("Issue body (optional): ").strip()
-    print(f"About to create issue in {os.environ['GITHUB_OWNER']}/{os.environ['GITHUB_REPO']}: {title!r}")
-    if not confirm("Create this issue?"):
-        print("Cancelled.")
-        return
-    label("tools/call", f"{gh.TOOL_MAP['create']}(title={title!r})")
-    result = await gh.create_repo_issue(gh_session, title, body)
     print(_tool_result_text(result))
 
 
@@ -210,10 +144,8 @@ FYP Assistant — MCP demo
   1. Explore server capabilities
   2. Read project resources
   3. View the meeting prompt
-  4. List GitHub tasks
-  5. Prepare a meeting summary with the LLM
-  6. Save the last generated summary
-  7. Create a GitHub task
+  4. Prepare a meeting summary with the LLM
+  5. Save the last generated summary
   0. Exit
 """
 
@@ -224,37 +156,23 @@ async def run() -> None:
         local = await stack.enter_async_context(local_client.open_local_server())
         print("Local MCP server connected.")
 
-        gh_session = None
-        if gh.github_configured():
-            try:
-                gh_session = await stack.enter_async_context(gh.open_github_server())
-                print(f"GitHub MCP server connected ({os.environ['GITHUB_OWNER']}/{os.environ['GITHUB_REPO']}).")
-            except Exception as e:
-                print(f"Could not start GitHub MCP server: {e}")
-        else:
-            print("GitHub not configured — options 4 and 7 will be disabled.")
-
         if not llm_service.llm_configured():
-            print("OPENAI_API_KEY not set — option 5 will be disabled.")
+            print("OPENAI_API_KEY not set — option 4 will be disabled.")
 
         while True:
             print(MENU)
             choice = input("Choose: ").strip()
             try:
                 if choice == "1":
-                    await menu_explore(local, gh_session)
+                    await menu_explore(local)
                 elif choice == "2":
                     await menu_read_resources(local)
                 elif choice == "3":
                     await menu_view_prompt(local)
                 elif choice == "4":
-                    await menu_list_github(gh_session)
+                    await menu_prepare_summary(local, state)
                 elif choice == "5":
-                    await menu_prepare_summary(local, gh_session, state)
-                elif choice == "6":
                     await menu_save_summary(local, state)
-                elif choice == "7":
-                    await menu_create_issue(gh_session)
                 elif choice == "0":
                     print("Bye.")
                     return

@@ -4,8 +4,8 @@ A tiny Python app for **teaching Model Context Protocol (MCP)** during a live
 session. The scenario is a student team working on a **Library Management
 System** for their final-year project (FYP), asking:
 
-> "Read our project requirements, check our GitHub tasks and help us prepare
-> for tomorrow's supervisor meeting."
+> "Read our project requirements and help us prepare for tomorrow's
+> supervisor meeting."
 
 You can drive the same MCP server two different ways:
 
@@ -28,30 +28,30 @@ You can drive the same MCP server two different ways:
                       |        |
      +----------------+        +----------------+
      |                                          |
-+----v-----------+    +---------------------+   +---v----------------+
-| client.py      |    | github_client.py    |   | llm_service.py     |
-| (MCP client)   |    | (MCP client)        |   | (OpenAI client)    |
-+----+-----------+    +----+----------------+   +----+---------------+
-     |                     |                         |
-     v                     v                         v
-+----------------+    +---------------------+   +----------------+
-| server.py      |    | github-mcp-server   |   |  OpenAI API    |
-| (local MCP     |    | (official GitHub    |   |                |
-|  server)       |    |  MCP server binary) |   |                |
-+----------------+    +---------------------+   +----------------+
++----v-----------+                          +---v----------------+
+| client.py      |                          | llm_service.py     |
+| (MCP client)   |                          | (OpenAI client)    |
++----+-----------+                          +----+---------------+
+     |                                           |
+     v                                           v
++----------------+                          +----------------+
+| server.py      |                          |  OpenAI API    |
+| (local MCP     |                          |                |
+|  server)       |                          |                |
++----------------+                          +----------------+
 
 
                 Option B: Claude desktop is the host
                 +---------------------------+
                 |   Claude desktop app      |
                 |  (host + MCP client)      |
-                +-----+---------------+-----+
-                      |               |
-       MCP over stdio |               | MCP over stdio
-                      v               v
-              +----------------+  +---------------------+
-              | server.py      |  | github-mcp-server   |
-              +----------------+  +---------------------+
+                +-----+---------------------+
+                      |
+       MCP over stdio |
+                      v
+              +----------------+
+              | server.py      |
+              +----------------+
 ```
 
 - **Host** — orchestrates and (optionally) talks to a model.
@@ -93,19 +93,9 @@ python main.py
 
 | Variable                        | Needed for                    | Notes                                    |
 |---------------------------------|-------------------------------|------------------------------------------|
-| `OPENAI_API_KEY`                | Menu option 5 (LLM summary)   | Options 1–4, 6, 7 work without           |
+| `OPENAI_API_KEY`                | Menu option 4 (LLM summary)   | Options 1–3, 5 work without              |
 | `OPENAI_MODEL`                  | Optional model override       | Default `gpt-4o-mini`                    |
-| `GITHUB_PERSONAL_ACCESS_TOKEN`  | Menu options 4, 5, 7          | Fine-grained PAT with `repo`             |
-| `GITHUB_OWNER`, `GITHUB_REPO`   | Menu options 4, 5, 7          | Restricts calls to one repo              |
-| `GITHUB_MCP_COMMAND`            | Launch of GitHub MCP server   | Default `github-mcp-server`              |
-| `GITHUB_MCP_ARGS`               | Extra args for launch         | Default `stdio`                          |
 | `FYP_OUTPUT_DIR`                | Where `save_meeting_summary` writes | Default `output/`                  |
-
-### GitHub MCP server
-
-Install the official binary from
-<https://github.com/github/github-mcp-server> and make sure it is on your
-`PATH`. The app spawns it over stdio and passes your PAT via env.
 
 ## Option A — Try it in 5 minutes (terminal host)
 
@@ -114,10 +104,9 @@ Install the official binary from
 3. Pick **2** — read both resources by URI.
 4. Pick **3** — retrieve the prompt with `duration_minutes=30`. **Point out:
    no LLM ran here.**
-5. Pick **4** — list issues from the configured repo (requires GitHub).
-6. Pick **5** — the host reads two resources, gets the prompt, lists issues,
-   and hands everything to OpenAI in one call.
-7. Pick **6** — save the generated summary with a `tools/call`.
+5. Pick **4** — the host reads two resources, gets the prompt, and hands
+   everything to OpenAI in one call.
+6. Pick **5** — save the generated summary with a `tools/call`.
 
 Every prompt in the terminal shows a `[method]` label so students can see the
 protocol call that is about to happen.
@@ -136,7 +125,7 @@ terminal app uses.
 
 Create the file if it does not exist.
 
-### 2. Add the servers
+### 2. Add the server
 
 Edit the file so it contains something like this. Adjust the absolute paths
 to match where you cloned this repo and where your Python lives.
@@ -152,13 +141,6 @@ to match where you cloned this repo and where your Python lives.
       "env": {
         "FYP_OUTPUT_DIR": "D:\\Sahiwal Tech Community\\MCP Session\\fyp-assistant\\output"
       }
-    },
-    "github": {
-      "command": "github-mcp-server",
-      "args": ["stdio"],
-      "env": {
-        "GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_your_token_here"
-      }
     }
   }
 }
@@ -170,7 +152,6 @@ Tips:
 - If `python` is not on Claude desktop's PATH, use the absolute path to your
   Python executable (e.g. `"C:\\Users\\hp\\...\\python.exe"`), or use `uv`:
   `"command": "uv"`, `"args": ["run", "--project", "D:\\...\\fyp-assistant", "python", "server.py"]`.
-- The `github` entry is optional — omit it if you only want the local server.
 
 ### 3. Restart Claude desktop and try it
 
@@ -182,8 +163,6 @@ a small tools icon in the composer. Try prompts like:
 - *"Use the prepare_supervisor_meeting prompt for a 30 minute meeting."* →
   Claude fetches the template via `prompts/get`, then writes the summary
   itself using the resource content.
-- *"List open issues in <owner>/<repo> and add them under section 1."* →
-  Claude calls the GitHub server's `list_issues` tool.
 - *"Save that as my meeting summary."* → Claude calls
   `save_meeting_summary`. It will ask for your confirmation because it is a
   destructive tool.
@@ -204,18 +183,6 @@ under the hood.
 - Tools appear but calls fail → make sure the paths in `env` exist and are
   writable by the Claude app.
 
-## Suggested GitHub issues to create by hand
-
-Create these in whichever repo you set as `GITHUB_OWNER/GITHUB_REPO`, so the
-demo has some real data to list:
-
-1. **Implement book search by title / author / ISBN** — return matches with
-   availability.
-2. **Add borrow / return flow with due-date tracking** — persist active loans
-   and history per student.
-3. **Overdue report** — list active loans past due, sorted by days overdue,
-   for a librarian's morning check.
-
 ## Tests
 
 ```bash
@@ -229,7 +196,7 @@ The single test file starts the real local MCP server over stdio and verifies:
 - Retrieving the prompt with arguments.
 - Saving and reading back a summary in an isolated `tmp_path`.
 
-GitHub, OpenAI and the Claude desktop path are **not** covered by automated
+OpenAI and the Claude desktop path are **not** covered by automated
 tests — they need real credentials or a running app.
 
 ## Explore with MCP Inspector
@@ -240,19 +207,16 @@ npx @modelcontextprotocol/inspector uv run python server.py
 
 ## What this app deliberately isn't
 
-- No autonomous agent loop inside `main.py`. Menu option 5 is a fixed
+- No autonomous agent loop inside `main.py`. Menu option 4 is a fixed
   sequence: the host chooses which MCP calls to make and only then calls the
   LLM to summarise. (Claude desktop, of course, decides for itself — that's
   the whole point of using it as the host.)
 - No database, ORM, web UI, Docker, or DI framework.
 - No custom JSON-RPC — everything goes through the official MCP SDK.
-- `save_meeting_summary` accepts no path argument; it always writes
-  `output/meeting_summary.md`, overwriting.
 
 ## Docs used
 
 - MCP Python SDK — <https://github.com/modelcontextprotocol/python-sdk>
 - MCP specification — <https://modelcontextprotocol.io>
 - Claude desktop MCP config — <https://modelcontextprotocol.io/quickstart/user>
-- GitHub MCP server — <https://github.com/github/github-mcp-server>
 - OpenAI Python SDK — <https://github.com/openai/openai-python>
